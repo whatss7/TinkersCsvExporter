@@ -1,0 +1,7 @@
+{
+  "tinkerscsvexporter.column.id": "ID",
+  "tinkerscsvexporter.column.name": "الاسم",
+  "tinkerscsvexporter.column.tier": "المستوى",
+  "tinkerscsvexporter.fallback.traits": "السمات: ",
+  "tinkerscsvexporter.none": "(لا شيء)"
+}

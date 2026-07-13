@@ -1,0 +1,7 @@
+{
+  "tinkerscsvexporter.column.id": "ID",
+  "tinkerscsvexporter.column.name": "Nombre",
+  "tinkerscsvexporter.column.tier": "Nivel",
+  "tinkerscsvexporter.fallback.traits": "Rasgos: ",
+  "tinkerscsvexporter.none": "(Ninguno)"
+}

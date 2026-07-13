@@ -1,0 +1,7 @@
+{
+  "tinkerscsvexporter.column.id": "ID",
+  "tinkerscsvexporter.column.name": "Nome",
+  "tinkerscsvexporter.column.tier": "Nível",
+  "tinkerscsvexporter.fallback.traits": "Traços: ",
+  "tinkerscsvexporter.none": "(Nenhum)"
+}

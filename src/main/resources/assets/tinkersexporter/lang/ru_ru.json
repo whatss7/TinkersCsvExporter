@@ -1,0 +1,7 @@
+{
+  "tinkerscsvexporter.column.id": "ID",
+  "tinkerscsvexporter.column.name": "Название",
+  "tinkerscsvexporter.column.tier": "Уровень",
+  "tinkerscsvexporter.fallback.traits": "Черты: ",
+  "tinkerscsvexporter.none": "(Нет)"
+}

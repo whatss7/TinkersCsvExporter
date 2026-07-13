@@ -1,0 +1,7 @@
+{
+  "tinkerscsvexporter.column.id": "ID",
+  "tinkerscsvexporter.column.name": "名前",
+  "tinkerscsvexporter.column.tier": "階層",
+  "tinkerscsvexporter.fallback.traits": "特性：",
+  "tinkerscsvexporter.none": "(なし)"
+}

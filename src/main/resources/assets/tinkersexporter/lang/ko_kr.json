@@ -1,0 +1,7 @@
+{
+  "tinkerscsvexporter.column.id": "ID",
+  "tinkerscsvexporter.column.name": "이름",
+  "tinkerscsvexporter.column.tier": "단계",
+  "tinkerscsvexporter.fallback.traits": "특성: ",
+  "tinkerscsvexporter.none": "(없음)"
+}
