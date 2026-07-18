@@ -3,146 +3,154 @@ package io.github.whatss7.tinkerscsvexporter;
 import net.minecraft.client.resources.language.I18n;
 
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Translates Tinkers' Exporter CSV column headers into human-readable labels.
  * <p>
- * The section of the header being translated is decided structurally rather than
- * inferred from the raw value's shape:
+ * A header is decomposed into three blocks:
  * <ul>
- *   <li>A header with no {@code /} is one of this mod's reserved columns and maps
- *       to the key {@code <modid>.column.<name>}.</li>
- *   <li>A header split by {@code /} has its first half translated as a material
- *       stat identifier ({@code stat.<modid>.<name>}) and its second half as a
- *       tool-stat field ({@code tool_stat.tconstruct.<snake_case>}).</li>
+ *   <li>{@code modid} — the mod owning the stat, extracted from the stat
+ *       identifier (e.g. {@code tconstruct} from {@code tconstruct:head});</li>
+ *   <li>{@code stat} — the stat name (e.g. {@code head});</li>
+ *   <li>{@code tool_stat} — the tool-stat field (e.g. {@code traits}).</li>
  * </ul>
- * A stat field that shares a reserved column name (e.g. {@code traits}) is
- * translated as a tool-stat and resolves through the upstream key, falling back
- * to this mod's {@code <modid>.fallback.<name>} namespace so it can be supplied
- * via the resource pack.
+ * A header with no {@code /} is one of this mod's reserved columns and maps to
+ * the key {@code <modid>.column.<name>}. The stat and tool_stat blocks are
+ * translated separately and joined with {@code /}.
  * <p>
- * Translation is resolved through {@link I18n}; when the primary (upstream) key
- * is missing, a second lookup under this mod's namespace is attempted so that
- * unrecognized keys can be appended via this mod's resource pack.
+ * Every translatable block resolves through the same chain of candidate keys:
+ * the owning mod's primary key first, then this mod's fallback of that full key,
+ * then Tinkers' Construct, and finally this mod's general fallback of the bare
+ * name ({@code <modid>.fallback.<...>}) so unrecognized keys can be supplied via
+ * this mod's resource pack. Reserved columns only have this mod's candidates
+ * (primary then fallback).
+ * <p>
+ * Translation is resolved through {@link I18n}; when a key is untranslated
+ * Minecraft returns it unchanged, in which case {@link #lookup(String)} reports
+ * failure with {@code null} and the caller falls through to the next candidate.
  */
 public class HeaderTranslator {
-
-    /** Mod identifier, used to namespace fallback translation keys. */
-    private final String modId;
-
     /**
-     * Maps a raw tool-stat field name to the canonical key used for translation
-     * lookups. A few Tinkers' Construct tool-stat fields are exposed under a
-     * different or ambiguous name than the key upstream provides, so they are
-     * redirected here instead of branching on each name individually.
+     * Maps a fully-qualified translation key to its canonical counterpart used
+     * for I18n lookups. The key is assembled in {@link #translateStat} as
+     * {@code <prefix><modId>.<field>}; a few Tinkers' Construct tool-stat fields
+     * are exposed under a different or ambiguous name than the key upstream
+     * provides. When an original key has no translation, {@link #lookup} retries
+     * the aliased counterpart from this map before reporting failure, avoiding
+     * per-name branching.
      */
-    private static final Map<String, String> TOOL_STAT_ALIASES = Map.of(
-            "attack", "attack_damage",
-            "melee_damage", "attack_damage",
-            "melee_speed", "attack_speed",
-            "tier", "harvest_tier",
-            "toughness", "armor_toughness"
+    private static final Map<String, String> ALIASES = Map.of(
+            "tool_stat.tconstruct.attack", "tool_stat.tconstruct.attack_damage",
+            "tool_stat.tconstruct.melee_damage", "tool_stat.tconstruct.attack_damage",
+            "tool_stat.tconstruct.melee_speed", "tool_stat.tconstruct.attack_speed",
+            "tool_stat.tconstruct.tier", "tool_stat.tconstruct.harvest_tier",
+            "tool_stat.tconstruct.toughness", "tool_stat.tconstruct.armor_toughness"
     );
 
     /**
-     * Identifies which portion of a header is being translated. This lets the
-     * correct translation key be derived without inspecting the raw value for
-     * clues such as a colon or camelCase shape.
-     */
-    private enum Section {
-        /** The material stat identifier, e.g. {@code tconstruct:head}. */
-        STAT,
-        /** A tool-stat field name, e.g. {@code miningSpeed}. */
-        TOOL_STAT,
-        /** A reserved column name, e.g. {@code id}, {@code name}, {@code tier}. */
-        COLUMN
-    }
-
-    /**
-     * @param modId the mod identifier (used for fallback resource-pack keys)
-     */
-    public HeaderTranslator(String modId) {
-        this.modId = modId;
-    }
-
-    /**
-     * Translates a full CSV column header into a label. The translated halves are
-     * joined with {@code /}, preserving any punctuation (e.g. the trailing colon
-     * of "护甲值："). Returns {@code null} when any half cannot be translated, so
-     * the caller can leave the cell blank.
+     * Translates a full CSV column header into a label. Most headers are split
+     * into three segments: {@code modid}, {@code stat}, and {@code tool_stat}.
+     * Headers that can't be split are reserved columns under this mod's
+     * namespace. The stat and tool-stat blocks are translated independently via
+     * {@link #translateStat}. The two translations are joined with {@code /}.
+     * Returns {@code null} when any block cannot be translated, so the caller
+     * can leave the cell blank.
      *
-     * @param header the column header, e.g. {@code tconstruct:plating_leggings/armor}
-     * @return the combined translation, or {@code null} if construction failed
+     * @param header the column header, e.g. {@code tconstruct:head/traits}
+     * @return the combined translation, or {@code null} if translation failed
      */
     public String translate(String header) {
-        String[] segments = header.split("/", 2);
-        if (segments.length == 1) {
-            // No slash: a reserved column.
-            return translateSegment(Section.COLUMN, segments[0]);
-        }
-        // Split by a slash: the first half is the stat, the second half is the
-        // tool-stat field (e.g. "traits" resolves via tool_stat.tconstruct.traits
-        // and, when untranslated, the tinkerscsvexporter.fallback.traits fallback).
-        String stat = translateSegment(Section.STAT, segments[0]);
-        if (stat == null) {
-            return null;
-        }
-        String rest = translateSegment(Section.TOOL_STAT, segments[1]);
-        if (rest == null) {
-            return null;
-        }
-        return stat + "/" + rest;
+        String[] segments = header.split("[:/]", 3);
+        // 1 segment: a reserved column, namespaced under this mod.
+        if (segments.length == 1) return translateColumn(segments[0]);
+        // 2 segments: failed.
+        if (segments.length == 2) return null;
+
+        assert (segments.length == 3);
+        String modId = segments[0];
+        String stat = segments[1];
+        String toolStat = segments[2];
+
+        // Translate the stat name and tool-stat field.
+        String statTrans = translateStat(modId, stat, "stat.", false);
+        if (statTrans == null) return null;
+        String toolTrans = translateStat(modId, toolStat, "tool_stat.", true);
+        if (toolTrans == null) return null;
+
+        return statTrans + "/" + toolTrans;
     }
 
     /**
-     * Translates a single header segment, deriving the translation key from the
-     * explicitly supplied {@link Section} rather than from the value's shape.
+     * Translates a reserved column name (e.g. {@code id}, {@code name},
+     * {@code tier}) via this mod's namespace, trying the primary key then the
+     * fallback key.
      *
-     * @param section the portion of the header being translated
-     * @param value   the raw segment value
-     * @return the translated label, or {@code null} when no translation exists
+     * @param name the reserved column name
+     * @return the translated label, or {@code null} when untranslated
      */
-    private String translateSegment(Section section, String value) {
-        return switch (section) {
-            case STAT -> {
-                String stat = value.replace(':', '.');
-                yield lookup("stat." + stat, stat);
-            }
-            case TOOL_STAT -> {
-                String snake = camelToSnake(value);
-                snake = TOOL_STAT_ALIASES.getOrDefault(snake, snake);
-                yield lookup("tool_stat.tconstruct." + snake, snake);
-            }
-            case COLUMN -> lookup(modId + ".column." + value.toLowerCase(), value.toLowerCase());
-        };
+    private String translateColumn(String name) {
+        String snake = name.toLowerCase();
+        String result = lookup(TinkersCsvExporter.MOD_ID + ".column." + snake);
+        if (result != null) return result;
+        return lookup(TinkersCsvExporter.MOD_ID + ".fallback." + snake);
     }
 
     /**
-     * Looks up a Minecraft translation key via the client-side I18n helper.
-     * Minecraft returns the key unchanged when no translation is registered, in
-     * which case this method reports failure with {@code null} so the caller can
-     * leave the cell blank.
-     * <p>
-     * When the primary (upstream) key is not found, a second lookup is attempted
-     * under this mod's own namespace ({@code <modid>.fallback.<fallback>}). This
-     * lets translations for keys that upstream mods fail to provide be appended
-     * through this mod's resource pack. If both lookups fail, {@code null} is
-     * returned so the corresponding cell is left blank.
+     * Translates a block, trying the owning mod's primary key first, then this
+     * mod's fallback of that full key, then Tinkers' Construct, then this
+     * mod's general fallback of the bare name.
      *
-     * @param key     the translation key
-     * @param fallback the suffix used to build the mod-namespaced fallback key
-     * @return the translated text, or {@code null} if untranslated
+     * @param modId     the mod owning the stat the block belongs to
+     * @param name      the raw block name (stat name, or camelCase tool-stat field)
+     * @param prefix    the translation key prefix, e.g. {@code "stat."} or
+     *                  {@code "tool_stat."}
+     * @param camelCase whether {@code name} is a camelCase tool-stat field that
+     *                  should be normalised to snake_case (alias redirect is
+     *                  handled inside {@link #lookup})
+     * @return the translated label, or {@code null} when all candidates fail
      */
-    private String lookup(String key, String fallback) {
-        String result = I18n.get(key);
-        if (!result.equals(key)) {
-            return result;
+    private String translateStat(String modId, String name, String prefix, boolean camelCase) {
+        String keyName = camelCase ? camelToSnake(name) : name;
+        String key = prefix + modId + "." + keyName;
+
+        // Try the owning mod's primary key first.
+        String result = lookup(key);
+        if (result != null) return result;
+
+        // Try this mod's fallback namespace to allow resource pack overrides.
+        result = lookup(TinkersCsvExporter.MOD_ID + ".fallback." + key);
+        if (result != null) return result;
+
+        // Fallback to Tinkers' Construct namespace.
+        result = lookup(prefix + "tconstruct." + keyName);
+        if (result != null) return result;
+
+        // Final fallback to this mod's general fallback namespace.
+        return lookup(TinkersCsvExporter.MOD_ID + ".fallback." + keyName);
+    }
+
+    /**
+     * Looks up a single Minecraft translation key via the client-side I18n
+     * helper. Minecraft returns the key unchanged when no translation is
+     * registered, so this method first checks the original key; if it has no
+     * translation, it retries the aliased counterpart from {@link #ALIASES}
+     * (used when an upstream tool-stat field is exposed under a different name)
+     * before reporting failure with {@code null}, so the caller can fall through
+     * to the next candidate in its chain.
+     *
+     * @param key the translation key (matched against {@link #ALIASES} on a miss)
+     * @return the translated text, or {@code null} if neither key is translated
+     */
+    private String lookup(String key) {
+        if (I18n.exists(key)) {
+            return I18n.get(key);
         }
-        // Fallback: a key namespaced under this mod, so missing translations can
-        // be supplied via this mod's resource pack (e.g. tinkerscsvexporter.fallback.melee_damage).
-        String fallback_key = modId + ".fallback." + fallback;
-        String fb = I18n.get(fallback_key);
-        return fb.equals(fallback_key) ? null : fb;
+        String aliased = ALIASES.getOrDefault(key, key);
+        if (!Objects.equals(aliased, key) && I18n.exists(aliased)) {
+            return I18n.get(aliased);
+        }
+        return null;
     }
 
     /**

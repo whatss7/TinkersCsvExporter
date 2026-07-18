@@ -1,5 +1,7 @@
 package io.github.whatss7.tinkerscsvexporter;
 
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.DistExecutor;
 import net.minecraftforge.fml.common.Mod;
 
 /**
@@ -8,9 +10,17 @@ import net.minecraftforge.fml.common.Mod;
  */
 @Mod(TinkersCsvExporter.MOD_ID)
 public class TinkersCsvExporter {
-    /** Unique identifier of this mod, used by Forge and for namespacing. */
+    /**
+     * Unique identifier of this mod, used by Forge and for namespacing.
+     */
     public static final String MOD_ID = "tinkerscsvexporter";
 
-    /** Default constructor invoked by Forge during mod construction. */
-    public TinkersCsvExporter() {}
+    /**
+     * Default constructor invoked by Forge during mod construction. Schedules the
+     * client-only setup through {@link net.minecraftforge.fml.DistExecutor#safeRunWhenOn}
+     * so that client-side command registration only runs on the physical client.
+     */
+    public TinkersCsvExporter() {
+        DistExecutor.safeRunWhenOn(Dist.CLIENT, () -> TinkersCsvExporterClientSetup::setup);
+    }
 }

@@ -18,20 +18,34 @@ import java.util.function.Function;
  * as a string or write it directly to a file.
  */
 public class CsvBuilder {
-    /** Header text used for the first column that holds the row keys. */
+    /**
+     * Header text used for the first column that holds the row keys.
+     */
     private String nameHeader = "Name";
-    /** Ordered set of all data column headers seen so far. */
+    /**
+     * Ordered set of all data column headers seen so far.
+     */
     private final LinkedHashSet<String> dataHeaders = new LinkedHashSet<>();
-    /** Row key -> (header -> cell value). Insertion order is preserved. */
+    /**
+     * Row key -> (header -> cell value). Insertion order is preserved.
+     */
     private final Map<String, Map<String, String>> rows = new LinkedHashMap<>();
-    /** Optional per-header sort priority; higher values are placed first. */
+    /**
+     * Optional per-header sort priority; higher values are placed first.
+     */
     private final Map<String, Integer> priorities = new HashMap<>();
-    /** Optional translator used to render the second (translation) header row. */
+    /**
+     * Optional translator used to render the second (translation) header row.
+     */
     private Function<String, String> translator;
-    /** When true, the translation is merged into the single header row instead
-     *  of being emitted as a separate second row. */
+    /**
+     * When true, the translation is merged into the single header row instead
+     * of being emitted as a separate second row.
+     */
     private boolean mergeTranslationHeader = false;
-    /** Destination file path used by {@link #buildAndWrite()}. */
+    /**
+     * Destination file path used by {@link #buildAndWrite()}.
+     */
     private final Path outputPath;
 
     /**
@@ -94,27 +108,37 @@ public class CsvBuilder {
         return this;
     }
 
-    /** Convenience overload that stores an {@code int} value as text. */
+    /**
+     * Convenience overload that stores an {@code int} value as text.
+     */
     public CsvBuilder put(String item, String header, int value) {
         return put(item, header, Integer.toString(value));
     }
 
-    /** Convenience overload that stores a {@code long} value as text. */
+    /**
+     * Convenience overload that stores a {@code long} value as text.
+     */
     public CsvBuilder put(String item, String header, long value) {
         return put(item, header, Long.toString(value));
     }
 
-    /** Convenience overload that stores a {@code float} value as text. */
+    /**
+     * Convenience overload that stores a {@code float} value as text.
+     */
     public CsvBuilder put(String item, String header, float value) {
         return put(item, header, Float.toString(value));
     }
 
-    /** Convenience overload that stores a {@code double} value as text. */
+    /**
+     * Convenience overload that stores a {@code double} value as text.
+     */
     public CsvBuilder put(String item, String header, double value) {
         return put(item, header, Double.toString(value));
     }
 
-    /** Convenience overload that stores a {@code boolean} value as text. */
+    /**
+     * Convenience overload that stores a {@code boolean} value as text.
+     */
     public CsvBuilder put(String item, String header, boolean value) {
         return put(item, header, Boolean.toString(value));
     }
@@ -151,9 +175,12 @@ public class CsvBuilder {
 
     /**
      * Renders all collected rows and columns into a CSV string, including the
-     * header line. When a {@link #translator(Function)} is configured, a second
-     * "translation" row is emitted immediately after the header, mirroring every
-     * column. Missing cells are rendered as empty fields.
+     * header line. When a {@link #translator(Function)} is configured, the
+     * translation is rendered according to the mode set via
+     * {@link #mergeTranslation(boolean)}: in merge mode it is collapsed into the
+     * single header row (falling back to the original header when blank), and
+     * otherwise a second "translation" row is emitted immediately after the
+     * header, mirroring every column. Missing cells are rendered as empty fields.
      *
      * @return the full CSV content
      */
@@ -201,7 +228,9 @@ public class CsvBuilder {
         return sb.toString();
     }
 
-    /** Applies the configured translator, mapping {@code null} to an empty cell. */
+    /**
+     * Applies the configured translator, mapping {@code null} to an empty cell.
+     */
     private String translate(String header) {
         if (translator == null) return "";
         String t = translator.apply(header);

@@ -15,6 +15,7 @@ import slimeknights.tconstruct.library.modifiers.ModifierEntry;
 import slimeknights.tconstruct.library.utils.HarvestTiers;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.RecordComponent;
 import java.util.LinkedHashMap;
@@ -28,7 +29,6 @@ import java.util.Map;
  * traits for the stat are appended under the {@code traits} key.
  */
 public class MaterialStatsSerializer {
-
     /**
      * Accumulates every trait encountered during serialization, keyed by the
      * trait's stable modifier id, so a single Markdown document can list all
@@ -70,7 +70,8 @@ public class MaterialStatsSerializer {
         JsonObject json = toJson(stats, material, registry);
         Map<String, String> fields = new LinkedHashMap<>();
         for (Map.Entry<String, JsonElement> entry : json.entrySet()) {
-            fields.put(entry.getKey(), entry.getValue().getAsString());
+            JsonElement element = entry.getValue();
+            fields.put(entry.getKey(), element.isJsonNull() ? "N/A" : element.getAsString());
         }
         return fields;
     }
@@ -116,10 +117,10 @@ public class MaterialStatsSerializer {
             // Remember each unique trait (keyed by its stable modifier id) with its
             // display name and description so a Markdown summary can be produced
             // once all materials are exported.
-            Component raw_name = entry.getModifier().getDisplayName();
+            Component rawName = entry.getModifier().getDisplayName();
             String id = entry.getModifier().getId().toString();
             Component description = entry.getModifier().getDescription();
-            collectedTraits.putIfAbsent(id, new TraitInfo(raw_name.getString(), description.getString()));
+            collectedTraits.putIfAbsent(id, new TraitInfo(rawName.getString(), description.getString()));
         }
         if (modifierBuilder.isEmpty()) {
             modifierBuilder.append(I18n.get(TinkersCsvExporter.MOD_ID + ".none"));
@@ -132,7 +133,9 @@ public class MaterialStatsSerializer {
     /**
      * Adds a value to the JSON object using the most appropriate JSON type.
      * Internal metadata types ({@link MaterialStatType} and {@link Class}) are
-     * skipped, and unknown types fall back to their {@code toString()} form.
+     * skipped. Unknown types first try to derive a human-readable name via a
+     * reflective {@code getDisplayName()} call (see {@link #tryGetDisplayName(Object)}),
+     * and only fall back to their {@code toString()} form when that yields nothing.
      */
     private void addValue(JsonObject json, String name, Object value) {
         if (value instanceof MaterialStatType) return;
@@ -147,19 +150,54 @@ public class MaterialStatsSerializer {
         } else if (value instanceof Boolean) {
             json.addProperty(name, (Boolean) value);
         } else if (value instanceof Tier tier) {
-            String tier_name = HarvestTiers.getName(tier).getString();
+            String tierName = HarvestTiers.getName(tier).getString();
             if (TierSortingRegistry.isTierSorted(tier)) {
-                List<Tier> tier_sort = TierSortingRegistry.getSortedTiers();
-                int tier_level = tier_sort.indexOf(tier);
-                json.addProperty(name, tier_level + "(" + tier_name + ")");
+                List<Tier> tierSort = TierSortingRegistry.getSortedTiers();
+                int tierLevel = tierSort.indexOf(tier);
+                json.addProperty(name, tierLevel + " (" + tierName + ")");
             } else {
-                json.addProperty(name, tier_name);
+                json.addProperty(name, tierName);
             }
         } else if (value.getClass().isEnum()) {
             json.addProperty(name, value.toString());
         } else {
-            json.addProperty(name, value.toString());
+            // Before the final toString() fallback, try to obtain a friendlier
+            // name via a reflective getDisplayName() call.
+            String displayName = tryGetDisplayName(value);
+            json.addProperty(name, displayName != null ? displayName : value.toString());
         }
+    }
+
+    /**
+     * Attempts to derive a human-readable name from {@code value} by reflectively
+     * invoking a no-arg {@code getDisplayName()} method, if one exists. The result
+     * is used directly when it is a {@link String}, or resolved via a no-arg
+     * {@code getString()} call when it is a {@link Component}-like object (any type
+     * exposing such a method, e.g. {@link Component}). Returns {@code null} when no
+     * usable name can be obtained, so the caller can fall back to
+     * {@link Object#toString()}.
+     *
+     * @param value the object to derive a display name from
+     * @return the display name string, or {@code null} if none is available
+     */
+    private static String tryGetDisplayName(Object value) {
+        try {
+            Method getDisplayName = value.getClass().getMethod("getDisplayName");
+            Object display = getDisplayName.invoke(value);
+            if (display == null) return null;
+            if (display instanceof String s) return s;
+
+            // Component-like: any object exposing a no-arg getString() method.
+            try {
+                Method getString = display.getClass().getMethod("getString");
+                Object str = getString.invoke(display);
+                if (str instanceof String s) return s;
+            } catch (NoSuchMethodException ignored) {
+                // Not Component-like; fall through to return null.
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
     }
 
     /**
@@ -169,8 +207,9 @@ public class MaterialStatsSerializer {
      */
     private void fallbackToReflection(Object obj, JsonObject json) {
         for (Field f : obj.getClass().getDeclaredFields()) {
-            // Skip static, compiler-generated, and outer-instance ("this$") fields.
+            // Skip static, transient, compiler-generated, and outer-instance ("this$") fields.
             if (Modifier.isStatic(f.getModifiers())) continue;
+            if (Modifier.isTransient(f.getModifiers())) continue;
             if (f.isSynthetic()) continue;
             if (f.getName().startsWith("this$")) continue;
 

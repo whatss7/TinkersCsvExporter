@@ -31,7 +31,6 @@ import static net.minecraft.commands.Commands.literal;
  * and header translation in {@link HeaderTranslator}.
  */
 public class TinkersCsvExporterExportCommand {
-
     /**
      * Registers the command tree {@code /tcexporter export} with the given
      * dispatcher.
@@ -52,12 +51,14 @@ public class TinkersCsvExporterExportCommand {
     }
 
     /**
-     * Executes the export: iterates over every visible material, collects its
-     * stats, writes them to a CSV file under {@code <gameDir>/tcexporter},
-     * and reports the result back to the player.
+     * Executes the export: iterates over every visible material (or all materials
+     * when {@code includeHidden} is true), collects its stats, and writes them to
+     * a CSV file under {@code <gameDir>/tcexporter}. A companion Markdown document
+     * describing every trait encountered is written alongside it.
      *
      * @param includeHidden whether to include hidden materials in the export
-     * @param detailed      whether to split header row and translation row
+     * @param detailed      whether to emit the header and its translation as
+     *                      separate rows (the default merges them into one)
      * @return 1 on success, 0 if there is no local player
      */
     private static int execute(Boolean includeHidden, Boolean detailed) {
@@ -71,7 +72,7 @@ public class TinkersCsvExporterExportCommand {
 
         // Helpers: one serializes stats, the other translates column headers.
         MaterialStatsSerializer serializer = new MaterialStatsSerializer();
-        HeaderTranslator translator = new HeaderTranslator(TinkersCsvExporter.MOD_ID);
+        HeaderTranslator translator = new HeaderTranslator();
 
         CsvBuilder builder = new CsvBuilder(exportPath)
                 .nameHeader("id")
@@ -85,10 +86,10 @@ public class TinkersCsvExporterExportCommand {
         IMaterialRegistry registry = MaterialRegistry.getInstance();
         Collection<IMaterial> materials = includeHidden ? registry.getAllMaterials() : registry.getVisibleMaterials();
 
-        int exported_count = 0;
+        int exportedCount = 0;
         for (IMaterial material : materials) {
             if (exportMaterial(builder, serializer, material, registry, includeHidden)) {
-                exported_count++;
+                exportedCount++;
             }
         }
 
@@ -97,7 +98,7 @@ public class TinkersCsvExporterExportCommand {
             Path traitsMd = gameDir.resolve("tcexporter/traits_" + time + ".md");
             writeTraitsMarkdown(traitsMd, serializer.getCollectedTraits(), detailed);
             player.sendSystemMessage(
-                    Component.literal("Exported " + exported_count + " materials to " + written
+                    Component.literal("Exported " + exportedCount + " materials to " + written
                             + " (traits: " + traitsMd + ")")
             );
         } catch (IOException e) {
@@ -145,16 +146,18 @@ public class TinkersCsvExporterExportCommand {
 
     /**
      * Writes a Markdown document listing every collected trait and its
-     * description. Traits are emitted in first-seen order with a level-2 heading
-     * per trait followed by its description paragraph. When {@code detailed} is
-     * true, the trait's modifier id is printed beneath the heading as well.
+     * description. Traits are emitted in lexicographic (dictionary) order by id
+     * with a level-2 heading per trait followed by its description paragraph.
+     * When {@code detailed} is true, the trait's modifier id is printed beneath
+     * the heading as well.
      *
      * @param path     the destination Markdown file path
-     * @param traits   the trait name to info map to render
+     * @param traits   the trait id to info map to render
      * @param detailed when true, also emit each trait's id
      * @throws IOException if the file cannot be written
      */
-    private static void writeTraitsMarkdown(Path path, Map<String, MaterialStatsSerializer.TraitInfo> traits, Boolean detailed) throws IOException {
+    private static void writeTraitsMarkdown(Path path, Map<String, MaterialStatsSerializer.TraitInfo> traits,
+                                            Boolean detailed) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("# Material Traits\n\n");
         if (traits.isEmpty()) {
