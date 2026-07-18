@@ -7,7 +7,7 @@ import net.minecraftforge.common.MinecraftForge;
  * constructor via {@link net.minecraftforge.fml.DistExecutor#safeRunWhenOn} so
  * that the registration below only runs on the physical client.
  * <p>
- * The setup subscribes {@link TinkersCsvExporterCommandRegistrar#onRegisterClientCommands}
+ * The setup subscribes {@link MaterialsLoadedEventHandler#onMaterialsLoaded}
  * to the Forge event bus, which in turn registers this mod's client commands when
  * the command registration event fires.
  */
@@ -18,7 +18,7 @@ public class TinkersCsvExporterClientSetup {
      */
     public static void setup() {
         MinecraftForge.EVENT_BUS.addListener(
-                TinkersCsvExporterCommandRegistrar::onRegisterClientCommands
+                MaterialsLoadedEventHandler::onMaterialsLoaded
         );
     }
 }

@@ -1,11 +1,7 @@
 package io.github.whatss7.tinkerscsvexporter;
 
-import com.mojang.brigadier.CommandDispatcher;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.player.LocalPlayer;
-import net.minecraft.commands.CommandSourceStack;
-import net.minecraft.network.chat.Component;
-import slimeknights.tconstruct.library.client.materials.MaterialTooltipCache;
+import slimeknights.tconstruct.library.events.MaterialsLoadedEvent;
 import slimeknights.tconstruct.library.materials.IMaterialRegistry;
 import slimeknights.tconstruct.library.materials.MaterialRegistry;
 import slimeknights.tconstruct.library.materials.definition.IMaterial;
@@ -13,6 +9,7 @@ import slimeknights.tconstruct.library.materials.stats.IMaterialStats;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
@@ -20,34 +17,45 @@ import java.time.format.DateTimeFormatter;
 import java.util.Collection;
 import java.util.Map;
 
-import static net.minecraft.commands.Commands.literal;
-
 /**
- * Implements the {@code /tcexporter export} client command, which dumps all
- * visible Tinkers' Construct materials and their stats to a timestamped CSV file.
+ * Dumps all Tinkers' Construct materials (both visible and hidden) and their
+ * stats to a timestamped CSV file, plus a companion Markdown traits document.
  * <p>
  * This class only orchestrates the export: material collection, CSV writing and
  * player feedback. Stat serialization lives in {@link MaterialStatsSerializer}
  * and header translation in {@link HeaderTranslator}.
  */
-public class TinkersCsvExporterExportCommand {
+public class MaterialsLoadedEventHandler {
+    static private Boolean hasExported = false;
+
+    public static void onMaterialsLoaded(MaterialsLoadedEvent event) {
+        // MaterialsLoadedEvent may be fired more than once, so we only need to export once.
+        if (hasExported) return;
+        hasExported = true;
+
+        // Skip the whole export when a previous run already produced a CSV, so we
+        // don't overwrite or duplicate the generated files on every login.c
+        Path exportDir = Minecraft.getInstance().gameDirectory.toPath().resolve("tcexporter");
+        if (csvAlreadyExists(exportDir)) return;
+
+        // Export both detailed and non-detailed CSV files.
+        exportMaterials(false, false);
+        exportMaterials(true, true);
+    }
+
     /**
-     * Registers the command tree {@code /tcexporter export} with the given
-     * dispatcher.
-     *
-     * @param dispatcher the client command dispatcher provided by Forge
+     * Returns true if {@code exportDir} exists and already holds at least one
+     * {@code .csv} file, indicating a prior export has run.
      */
-    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
-        dispatcher.register(literal("tcexporter")
-                .then(literal("export")
-                        .executes((context) -> TinkersCsvExporterExportCommand.execute(false, false))
-                        .then(literal("detailed")
-                                .executes((context) -> TinkersCsvExporterExportCommand.execute(false, true)))
-                        .then(literal("all")
-                                .executes((context) -> TinkersCsvExporterExportCommand.execute(true, false)))
-                        .then(literal("all-detailed")
-                                .executes((context) -> TinkersCsvExporterExportCommand.execute(true, true)))
-                ));
+    private static boolean csvAlreadyExists(Path exportDir) {
+        if (!Files.isDirectory(exportDir)) {
+            return false;
+        }
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(exportDir, "*.csv")) {
+            return stream.iterator().hasNext();
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     /**
@@ -59,16 +67,13 @@ public class TinkersCsvExporterExportCommand {
      * @param includeHidden whether to include hidden materials in the export
      * @param detailed      whether to emit the header and its translation as
      *                      separate rows (the default merges them into one)
-     * @return 1 on success, 0 if there is no local player
      */
-    private static int execute(Boolean includeHidden, Boolean detailed) {
-        LocalPlayer player = Minecraft.getInstance().player;
-        if (player == null) return 0;
-
+    private static void exportMaterials(Boolean includeHidden, Boolean detailed) {
         // Build a unique, timestamped output path inside the game directory.
         Path gameDir = Minecraft.getInstance().gameDirectory.toPath();
         String time = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss"));
-        Path exportPath = gameDir.resolve("tcexporter/materials_" + time + ".csv");
+        String detailedStr = detailed ? "_detailed" : "";
+        Path exportPath = gameDir.resolve("tcexporter/materials_" + time + detailedStr + ".csv");
 
         // Helpers: one serializes stats, the other translates column headers.
         MaterialStatsSerializer serializer = new MaterialStatsSerializer();
@@ -86,27 +91,18 @@ public class TinkersCsvExporterExportCommand {
         IMaterialRegistry registry = MaterialRegistry.getInstance();
         Collection<IMaterial> materials = includeHidden ? registry.getAllMaterials() : registry.getVisibleMaterials();
 
-        int exportedCount = 0;
         for (IMaterial material : materials) {
-            if (exportMaterial(builder, serializer, material, registry, includeHidden)) {
-                exportedCount++;
-            }
+            exportMaterial(builder, serializer, material, registry, includeHidden);
         }
 
         try {
-            Path written = builder.buildAndWrite();
-            Path traitsMd = gameDir.resolve("tcexporter/traits_" + time + ".md");
-            writeTraitsMarkdown(traitsMd, serializer.getCollectedTraits(), detailed);
-            player.sendSystemMessage(
-                    Component.literal("Exported " + exportedCount + " materials to " + written
-                            + " (traits: " + traitsMd + ")")
-            );
-        } catch (IOException e) {
-            player.sendSystemMessage(
-                    Component.literal("Failed to export materials: " + e.getMessage())
-            );
+            builder.buildAndWrite();
+            if (detailed) {
+                Path traitsMd = gameDir.resolve("tcexporter/traits_" + time + "_detailed.md");
+                writeTraitsMarkdown(traitsMd, serializer.getCollectedTraits());
+            }
+        } catch (IOException ignored) {
         }
-        return 1;
     }
 
     /**
@@ -119,19 +115,18 @@ public class TinkersCsvExporterExportCommand {
      * @param material   the material to export
      * @param registry   the material registry used to look up stats
      * @param forced     whether to export the material even if it has no stats
-     * @return true if the material was exported, false if it had no stats
      */
-    private static Boolean exportMaterial(CsvBuilder builder, MaterialStatsSerializer serializer,
-                                          IMaterial material, IMaterialRegistry registry, Boolean forced) {
+    private static void exportMaterial(CsvBuilder builder, MaterialStatsSerializer serializer,
+                                       IMaterial material, IMaterialRegistry registry, Boolean forced) {
         if (registry.getAllStats(material.getIdentifier()).isEmpty() && !forced) {
-            return false;
+            return;
         }
 
         String id = material.getIdentifier().toString();
 
         // Basic identity columns shared by every material.
         builder.addItem(id)
-                .put(id, "name", MaterialTooltipCache.getDisplayName(material.getIdentifier()).getString())
+                .put(id, "name", material.getDisplayName().getString())
                 .put(id, "tier", String.valueOf(material.getTier()));
 
         // Expand each stat type into prefixed columns.
@@ -141,23 +136,19 @@ public class TinkersCsvExporterExportCommand {
                 builder.put(id, prefix + entry.getKey(), entry.getValue());
             }
         }
-        return true;
     }
 
     /**
      * Writes a Markdown document listing every collected trait and its
      * description. Traits are emitted in lexicographic (dictionary) order by id
-     * with a level-2 heading per trait followed by its description paragraph.
-     * When {@code detailed} is true, the trait's modifier id is printed beneath
-     * the heading as well.
+     * with a level-2 heading per trait, its modifier id printed beneath the
+     * heading, followed by its description paragraph.
      *
-     * @param path     the destination Markdown file path
-     * @param traits   the trait id to info map to render
-     * @param detailed when true, also emit each trait's id
+     * @param path   the destination Markdown file path
+     * @param traits the trait id to info map to render
      * @throws IOException if the file cannot be written
      */
-    private static void writeTraitsMarkdown(Path path, Map<String, MaterialStatsSerializer.TraitInfo> traits,
-                                            Boolean detailed) throws IOException {
+    private static void writeTraitsMarkdown(Path path, Map<String, MaterialStatsSerializer.TraitInfo> traits) throws IOException {
         StringBuilder sb = new StringBuilder();
         sb.append("# Material Traits\n\n");
         if (traits.isEmpty()) {
@@ -168,13 +159,11 @@ public class TinkersCsvExporterExportCommand {
                     .sorted(Map.Entry.comparingByKey())
                     .forEach(trait -> {
                         sb.append("## ").append(trait.getValue().name()).append("\n\n");
-                        if (detailed) {
-                            sb.append("id: ").append(trait.getKey()).append("\n\n");
-                        }
+                        sb.append("id: ").append(trait.getKey()).append("\n\n");
                         sb.append(trait.getValue().description()).append("\n\n");
                     });
         }
         Files.createDirectories(path.getParent());
-        Files.writeString(path, sb.toString(), StandardCharsets.UTF_8);
+        Files.write(path, sb.toString().getBytes(StandardCharsets.UTF_8));
     }
 }

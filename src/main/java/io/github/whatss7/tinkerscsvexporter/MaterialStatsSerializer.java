@@ -3,30 +3,28 @@ package io.github.whatss7.tinkerscsvexporter;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
-import net.minecraft.client.resources.language.I18n;
-import net.minecraft.network.chat.Component;
-import net.minecraft.world.item.Tier;
-import net.minecraftforge.common.TierSortingRegistry;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.util.text.ITextComponent;
 import slimeknights.tconstruct.library.materials.IMaterialRegistry;
 import slimeknights.tconstruct.library.materials.definition.IMaterial;
 import slimeknights.tconstruct.library.materials.stats.IMaterialStats;
 import slimeknights.tconstruct.library.materials.stats.MaterialStatType;
 import slimeknights.tconstruct.library.modifiers.ModifierEntry;
-import slimeknights.tconstruct.library.utils.HarvestTiers;
+import slimeknights.tconstruct.library.utils.HarvestLevels;
 
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
-import java.lang.reflect.RecordComponent;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Serializes a Tinkers' Construct material stat into a flat map of field name to
- * string value. Record-based stats are read via their record accessors, other
- * types fall back to reflection over declared fields, and the material's bound
- * traits for the stat are appended under the {@code traits} key.
+ * string value. Stat fields are read via reflection over declared fields, and
+ * the material's bound traits for the stat are appended under the
+ * {@code traits} key.
  */
 public class MaterialStatsSerializer {
     /**
@@ -51,11 +49,23 @@ public class MaterialStatsSerializer {
     /**
      * Holds the display name and description of a single collected trait. The
      * trait's id is used as the map key elsewhere.
-     *
-     * @param name        the trait's human-readable display name
-     * @param description the trait's human-readable description
      */
-    public record TraitInfo(String name, String description) {
+    public static class TraitInfo {
+        private final String name;
+        private final String description;
+
+        public TraitInfo(String name, String description) {
+            this.name = name;
+            this.description = description;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        public String description() {
+            return description;
+        }
     }
 
     /**
@@ -78,51 +88,34 @@ public class MaterialStatsSerializer {
 
     /**
      * Converts a stat instance into a flat {@link JsonObject} of field name to
-     * value. Record-based stats are read via their record accessors; other types
-     * fall back to reflection over declared fields. The material's traits for
-     * this stat are appended under a {@code traits} key.
+     * value. Stat fields are read via reflection over declared fields. The
+     * material's traits for this stat are appended under a {@code traits} key.
      */
     private JsonObject toJson(IMaterialStats stats, IMaterial material, IMaterialRegistry registry) {
         JsonObject json = new JsonObject();
-        Class<?> clazz = stats.getClass();
 
-        // Prefer record accessors when the stat is a record type.
-        RecordComponent[] components = clazz.getRecordComponents();
-        if (components != null && components.length > 0) {
-            for (RecordComponent component : components) {
-                try {
-                    String name = component.getName();
-                    Object value = component.getAccessor().invoke(stats);
-                    addValue(json, name, value);
-                } catch (Exception ignored) {
-                }
-            }
-        } else {
-            // Non-record stats: read fields reflectively.
-            fallbackToReflection(stats, json);
-        }
+        // Read stat fields reflectively.
+        reflectFields(stats, json);
 
         // Collect the display names of all bound traits for this material/stat pair.
         List<ModifierEntry> traits = registry.getTraits(material.getIdentifier(), stats.getIdentifier());
 
         StringBuilder modifierBuilder = new StringBuilder();
         for (ModifierEntry entry : traits) {
-            if (!entry.isBound()) continue;
-
             // Display the display name of the trait (contains level).
-            Component name = entry.getDisplayName();
-            if (!modifierBuilder.isEmpty()) modifierBuilder.append(", ");
+            ITextComponent name = entry.getModifier().getDisplayName(entry.getLevel());
+            if (modifierBuilder.length() != 0) modifierBuilder.append(", ");
             modifierBuilder.append(name.getString());
 
             // Remember each unique trait (keyed by its stable modifier id) with its
             // display name and description so a Markdown summary can be produced
             // once all materials are exported.
-            Component rawName = entry.getModifier().getDisplayName();
+            ITextComponent rawName = entry.getModifier().getDisplayName();
             String id = entry.getModifier().getId().toString();
-            Component description = entry.getModifier().getDescription();
+            ITextComponent description = entry.getModifier().getDescription();
             collectedTraits.putIfAbsent(id, new TraitInfo(rawName.getString(), description.getString()));
         }
-        if (modifierBuilder.isEmpty()) {
+        if (modifierBuilder.length() == 0) {
             modifierBuilder.append(I18n.get(TinkersCsvExporter.MOD_ID + ".none"));
         }
         json.addProperty("traits", modifierBuilder.toString());
@@ -144,20 +137,17 @@ public class MaterialStatsSerializer {
         if (value == null) {
             json.add(name, JsonNull.INSTANCE);
         } else if (value instanceof Number) {
-            json.addProperty(name, (Number) value);
+            if (value instanceof Integer && Objects.equals(name, "harvestLevel")) {
+                Integer tier = (Integer) value;
+                ITextComponent tierName = HarvestLevels.getHarvestLevelName(tier);
+                json.addProperty(name, tier + " (" + tierName.getString() + ")");
+            } else {
+                json.addProperty(name, (Number) value);
+            }
         } else if (value instanceof String) {
             json.addProperty(name, (String) value);
         } else if (value instanceof Boolean) {
             json.addProperty(name, (Boolean) value);
-        } else if (value instanceof Tier tier) {
-            String tierName = HarvestTiers.getName(tier).getString();
-            if (TierSortingRegistry.isTierSorted(tier)) {
-                List<Tier> tierSort = TierSortingRegistry.getSortedTiers();
-                int tierLevel = tierSort.indexOf(tier);
-                json.addProperty(name, tierLevel + " (" + tierName + ")");
-            } else {
-                json.addProperty(name, tierName);
-            }
         } else if (value.getClass().isEnum()) {
             json.addProperty(name, value.toString());
         } else {
@@ -172,10 +162,10 @@ public class MaterialStatsSerializer {
      * Attempts to derive a human-readable name from {@code value} by reflectively
      * invoking a no-arg {@code getDisplayName()} method, if one exists. The result
      * is used directly when it is a {@link String}, or resolved via a no-arg
-     * {@code getString()} call when it is a {@link Component}-like object (any type
-     * exposing such a method, e.g. {@link Component}). Returns {@code null} when no
-     * usable name can be obtained, so the caller can fall back to
-     * {@link Object#toString()}.
+     * {@code getString()} call when it is a {@link ITextComponent}-like object
+     * (any type exposing such a method, e.g. {@link ITextComponent}). Returns
+     * {@code null} when no usable name can be obtained, so the caller can fall back
+     * to {@link Object#toString()}.
      *
      * @param value the object to derive a display name from
      * @return the display name string, or {@code null} if none is available
@@ -185,13 +175,13 @@ public class MaterialStatsSerializer {
             Method getDisplayName = value.getClass().getMethod("getDisplayName");
             Object display = getDisplayName.invoke(value);
             if (display == null) return null;
-            if (display instanceof String s) return s;
+            if (display instanceof String) return (String) display;
 
             // Component-like: any object exposing a no-arg getString() method.
             try {
                 Method getString = display.getClass().getMethod("getString");
                 Object str = getString.invoke(display);
-                if (str instanceof String s) return s;
+                if (str instanceof String) return (String) str;
             } catch (NoSuchMethodException ignored) {
                 // Not Component-like; fall through to return null.
             }
@@ -205,7 +195,7 @@ public class MaterialStatsSerializer {
      * them to {@code json}. Static, synthetic, and outer-class reference fields
      * are skipped.
      */
-    private void fallbackToReflection(Object obj, JsonObject json) {
+    private void reflectFields(Object obj, JsonObject json) {
         for (Field f : obj.getClass().getDeclaredFields()) {
             // Skip static, transient, compiler-generated, and outer-instance ("this$") fields.
             if (Modifier.isStatic(f.getModifiers())) continue;
