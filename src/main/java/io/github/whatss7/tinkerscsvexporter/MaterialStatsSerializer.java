@@ -5,7 +5,6 @@ import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import net.minecraft.client.resources.language.I18n;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Tier;
 import net.minecraftforge.common.TierSortingRegistry;
 import slimeknights.tconstruct.library.materials.IMaterialRegistry;
@@ -22,7 +21,6 @@ import java.lang.reflect.RecordComponent;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 
 /**
  * Serializes a Tinkers' Construct material stat into a flat map of field name to
@@ -112,7 +110,7 @@ public class MaterialStatsSerializer {
             if (!entry.isBound()) continue;
 
             // Display the display name of the trait (contains level).
-            Component name = entry.getModifier().getDisplayName(entry.getLevel());
+            Component name = entry.getDisplayName();
             if (!modifierBuilder.isEmpty()) modifierBuilder.append(", ");
             modifierBuilder.append(name.getString());
 
@@ -151,21 +149,14 @@ public class MaterialStatsSerializer {
             json.addProperty(name, (String) value);
         } else if (value instanceof Boolean) {
             json.addProperty(name, (Boolean) value);
-        } else if (value instanceof ResourceLocation location) {
-            if (Objects.equals(name, "harvestTier")) {
-                Tier tier = TierSortingRegistry.byName(location);
-                if (tier == null) {
-                    json.addProperty(name, location.toString());
-                } else {
-                    String tierName = HarvestTiers.getName(tier).getString();
-                    if (TierSortingRegistry.isTierSorted(tier)) {
-                        List<Tier> tierSort = TierSortingRegistry.getSortedTiers();
-                        int tierLevel = tierSort.indexOf(tier);
-                        json.addProperty(name, tierLevel + " (" + tierName + ")");
-                    } else {
-                        json.addProperty(name, tierName);
-                    }
-                }
+        } else if (value instanceof Tier tier) {
+            String tierName = HarvestTiers.getName(tier).getString();
+            if (TierSortingRegistry.isTierSorted(tier)) {
+                List<Tier> tierSort = TierSortingRegistry.getSortedTiers();
+                int tierLevel = tierSort.indexOf(tier);
+                json.addProperty(name, tierLevel + " (" + tierName + ")");
+            } else {
+                json.addProperty(name, tierName);
             }
         } else if (value.getClass().isEnum()) {
             json.addProperty(name, value.toString());
