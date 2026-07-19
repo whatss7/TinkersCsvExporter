@@ -1,8 +1,7 @@
 package io.github.whatss7.tinkerscsvexporter;
 
-import net.minecraft.client.resources.I18n;
+import net.minecraft.client.resources.language.I18n;
 
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
 
@@ -41,15 +40,14 @@ public class HeaderTranslator {
      * the aliased counterpart from this map before reporting failure, avoiding
      * per-name branching.
      */
-    private static final Map<String, String> ALIASES = new HashMap<>();
-
-    static {
-        ALIASES.put("tool_stat.tconstruct.attack", "tool_stat.tconstruct.attack_damage");
-        ALIASES.put("tool_stat.tconstruct.melee_damage", "tool_stat.tconstruct.attack_damage");
-        ALIASES.put("tool_stat.tconstruct.melee_speed", "tool_stat.tconstruct.attack_speed");
-        ALIASES.put("tool_stat.tconstruct.tier", "tool_stat.tconstruct.harvest_tier");
-        ALIASES.put("tool_stat.tconstruct.toughness", "tool_stat.tconstruct.armor_toughness");
-    }
+    private static final Map<String, String> ALIASES = Map.of(
+            "tool_stat.tconstruct.attack", "tool_stat.tconstruct.attack_damage",
+            "tool_stat.tconstruct.melee_damage", "tool_stat.tconstruct.attack_damage",
+            "tool_stat.tconstruct.melee_attack", "tool_stat.tconstruct.attack_damage",
+            "tool_stat.tconstruct.melee_speed", "tool_stat.tconstruct.attack_speed",
+            "tool_stat.tconstruct.tier", "tool_stat.tconstruct.harvest_tier",
+            "tool_stat.tconstruct.toughness", "tool_stat.tconstruct.armor_toughness"
+    );
 
     /**
      * Translates a full CSV column header into a label. Most headers are split

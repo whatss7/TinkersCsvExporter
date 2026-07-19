@@ -1,6 +1,7 @@
 package io.github.whatss7.tinkerscsvexporter;
 
 import net.minecraft.client.Minecraft;
+import slimeknights.tconstruct.library.client.materials.MaterialTooltipCache;
 import slimeknights.tconstruct.library.events.MaterialsLoadedEvent;
 import slimeknights.tconstruct.library.materials.IMaterialRegistry;
 import slimeknights.tconstruct.library.materials.MaterialRegistry;
@@ -126,7 +127,7 @@ public class MaterialsLoadedEventHandler {
 
         // Basic identity columns shared by every material.
         builder.addItem(id)
-                .put(id, "name", material.getDisplayName().getString())
+                .put(id, "name", MaterialTooltipCache.getDisplayName(material.getIdentifier()).getString())
                 .put(id, "tier", String.valueOf(material.getTier()));
 
         // Expand each stat type into prefixed columns.
@@ -164,6 +165,6 @@ public class MaterialsLoadedEventHandler {
                     });
         }
         Files.createDirectories(path.getParent());
-        Files.write(path, sb.toString().getBytes(StandardCharsets.UTF_8));
+        Files.writeString(path, sb.toString(), StandardCharsets.UTF_8);
     }
 }
